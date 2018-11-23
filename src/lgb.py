@@ -17,8 +17,19 @@ from datetime import date, timedelta
 from sklearn.metrics import mean_squared_error
 from sklearn.preprocessing import LabelEncoder
 
-# 1. Preprocess
-# ====================================================================================
+# ====================================================================================== #
+# 1. 预处理
+
+print("[INFO] Loading data...")
+t0 = time()
+
+# df_train = pd.read_csv(
+#     "../data/train.csv", usecols=[1, 2, 3, 4, 5],  # 舍弃id
+#     dtype={'onpromotion': bool}, parse_dates=['date'],
+#     converters={'unit_sales': lambda u: np.log1p(float(u)) if float(u) > 0 else 0},
+#     skiprows=range(1, 66458909)
+# )
+# df_2017 = df_train[df_train['date'] >= '2017-01-01']
 
 df_2017 = pd.read_csv("../data/train-2017.csv", parse_dates=['date'])
 df_test = pd.read_csv(
@@ -28,22 +39,18 @@ df_test = pd.read_csv(
 stores = pd.read_csv("../data/stores.csv").set_index("store_nbr")
 items = pd.read_csv("../data/items.csv").set_index('item_nbr')
 
+print("[INFO] Finished! ( ^ _ ^ ) V")
+print("[INFO] Done in %f seconds." % (time() - t0))
+
 encoder = LabelEncoder()
 stores['city'] = encoder.fit_transform(stores['city'].values)
 stores['state'] = encoder.fit_transform(stores['state'].values)
 stores['type'] = encoder.fit_transform(stores['type'].values)
 items['family'] = encoder.fit_transform(items['family'].values)
 
-# 每个店铺商品每天的销量
-df_2017 = df_2017.set_index(
-    ['store_nbr', 'item_nbr', 'date'])[['unit_sales']].unstack(
-        level=-1).fillna(0)
-df_2017.columns = df_2017.columns.get_level_values(1)
-
 # 每个店铺商品每天的促销情况
 promo_2017_train = df_2017.set_index(
-    ['store_nbr', 'item_nbr', 'date'])[['onpromotion']].unstack(
-        level=-1).fillna(False)
+    ['store_nbr', 'item_nbr', 'date'])[['onpromotion']].unstack(level=-1).fillna(False)
 promo_2017_train.columns = promo_2017_train.columns.get_level_values(1)
 promo_2017_test = df_test[['onpromotion']].unstack(level=-1).fillna(False)
 promo_2017_test.columns = promo_2017_test.columns.get_level_values(1)
@@ -52,8 +59,13 @@ promo_2017 = pd.concat([promo_2017_train, promo_2017_test], axis=1)
 del promo_2017_train, promo_2017_test
 gc.collect()
 
-items = items.reindex(df_2017.index.get_level_values(1))
+# 每个店铺商品每天的销量
+df_2017 = df_2017.set_index(
+    ['store_nbr', 'item_nbr', 'date'])[['unit_sales']].unstack(level=-1).fillna(0)
+df_2017.columns = df_2017.columns.get_level_values(1)
+
 stores = stores.reindex(df_2017.index.get_level_values(0))
+items = items.reindex(df_2017.index.get_level_values(1))
 
 # 每件商品每天的销量
 df_2017_item = df_2017.groupby('item_nbr')[df_2017.columns].sum()
@@ -73,8 +85,10 @@ promo_2017_store_class['class'] = items['class'].values
 promo_2017_store_class_index = promo_2017_store_class[['class', 'store_nbr']]
 promo_2017_store_class = promo_2017_store_class.groupby(['class', 'store_nbr'])[promo_2017.columns].sum()
 
+# ====================================================================================== #
+
+# ====================================================================================== #
 # 2. Feature engineering
-# ====================================================================================
 
 
 def get_timespan(df, dt, minus, periods, freq='D'):
@@ -84,9 +98,9 @@ def get_timespan(df, dt, minus, periods, freq='D'):
 def prepare_dataset(df, promo_df, t2017, is_train=True, name_prefix=None):
     # 促销天数特征（6个特征）
     X = {
-        'promo_14_2017': get_timespan(promo_df, t2017, 14, 14).sum(axis=1).values,  # 前14天中每个店铺商品的促销天数
-        'promo_60_2017': get_timespan(promo_df, t2017, 60, 60).sum(axis=1).values,  # 前60天中每个店铺商品的促销天数
-        'promo_140_2017': get_timespan(promo_df, t2017, 140, 140).sum(axis=1).values,  # 前140天中每个店铺商品的促销天数
+        # 'promo_14_2017': get_timespan(promo_df, t2017, 14, 14).sum(axis=1).values,  # 前14天中每个店铺商品的促销天数
+        # 'promo_60_2017': get_timespan(promo_df, t2017, 60, 60).sum(axis=1).values,  # 前60天中每个店铺商品的促销天数
+        # 'promo_140_2017': get_timespan(promo_df, t2017, 140, 140).sum(axis=1).values,  # 前140天中每个店铺商品的促销天数
         'promo_3_2017_aft': get_timespan(promo_df, t2017 + timedelta(days=16), 15, 3).sum(
             axis=1).values,  # 后3天中每个店铺商品的促销天数
         'promo_7_2017_aft': get_timespan(promo_df, t2017 + timedelta(days=16), 15, 7).sum(
@@ -159,7 +173,7 @@ def prepare_dataset(df, promo_df, t2017, is_train=True, name_prefix=None):
     for i in range(1, 16):
         X['day_%s_2017' % i] = get_timespan(df, t2017, i, 1).values.ravel()
 
-    # 前4（20）周每天的平均销量（14个特征）
+    # 前4（20）周每个星期几的平均销量（14个特征）
     for i in range(7):
         X['mean_4_dow{}_2017'.format(i)] = get_timespan(df, t2017, 28 - i, 4, freq='7D').mean(axis=1).values
         X['mean_20_dow{}_2017'.format(i)] = get_timespan(df, t2017, 140 - i, 20, freq='7D').mean(axis=1).values
@@ -212,6 +226,9 @@ y_train = np.concatenate(y_l, axis=0)
 del X_l, y_l
 gc.collect()
 
+print("[INFO] Finished! ( ^ _ ^ ) V")
+print("[INFO] Done in %f seconds." % (time() - t0))
+
 # 准备验证集
 print("[INFO] Preparing validation data...")
 
@@ -221,7 +238,8 @@ X_val2 = prepare_dataset(df_2017_item, promo_2017_item, date(2017, 7, 26), is_tr
 X_val2.index = df_2017_item.index
 X_val2 = X_val2.reindex(df_2017.index.get_level_values(1)).reset_index(drop=True)
 
-X_val3 = prepare_dataset(df_2017_store_class, promo_2017_store_class, date(2017, 7, 26), is_train=False, name_prefix='store_class')
+X_val3 = prepare_dataset(
+    df_2017_store_class, promo_2017_store_class, date(2017, 7, 26), is_train=False, name_prefix='store_class')
 X_val3.index = df_2017_store_class.index
 X_val3 = X_val3.reindex(df_2017_store_class_index).reset_index(drop=True)
 
@@ -229,6 +247,9 @@ X_val = pd.concat([X_val, X_val2, X_val3, items.reset_index(), stores.reset_inde
 
 del X_val2, X_val3
 gc.collect()
+
+print("[INFO] Finished! ( ^ _ ^ ) V")
+print("[INFO] Done in %f seconds." % (time() - t0))
 
 # 准备测试集
 print("[INFO] Preparing testing data...")
@@ -248,10 +269,15 @@ X_test = pd.concat([X_test, X_test2, X_test3, items.reset_index(), stores.reset_
 del X_test2, X_test3
 gc.collect()
 
-# 3. Train a model and predict
-# ====================================================================================
+print("[INFO] Finished! ( ^ _ ^ ) V")
+print("[INFO] Done in %f seconds." % (time() - t0))
 
-print("[INFO] Start training...")
+# ====================================================================================== #
+
+# ====================================================================================== #
+# 3. Train a model and predict
+
+print("[INFO] Start training and predicting...")
 t0 = time()
 
 params = {
@@ -297,8 +323,8 @@ for i in range(16):
     test_pred.append(
         bst.predict(X_test, num_iteration=bst.best_iteration or MAX_ROUNDS))
 
+print("[INFO] Finished! ( ^ _ ^ ) V")
 print("[INFO] Done in %f seconds." % (time() - t0))
-print("[INFO] Training Finished! ( ^ _ ^ ) V")
 
 print("Validation mse:", mean_squared_error(y_val, np.array(val_pred).transpose()))
 
@@ -317,10 +343,13 @@ df_preds.index.set_names(['store_nbr', 'item_nbr', 'date'], inplace=True)
 df_preds['unit_sales'] = np.clip(np.expm1(df_preds['unit_sales']), 0, 1000)
 df_preds.reset_index().to_csv('lgb_cv.csv', index=False)
 
-# 4. Make a submission
-# ====================================================================================
+# ====================================================================================== #
 
-print("[INFO] Making submission...")
+# ====================================================================================== #
+# 4. Make a submission
+
+print("[INFO] Make submission...")
+t0 = time()
 
 y_test = np.array(test_pred).transpose()
 df_preds = pd.DataFrame(
@@ -332,3 +361,8 @@ df_preds.index.set_names(['store_nbr', 'item_nbr', 'date'], inplace=True)
 submission = df_test[['id']].join(df_preds, how='left').fillna(0)
 submission['unit_sales'] = np.clip(np.expm1(submission['unit_sales']), 0, 1000)
 submission.to_csv('lgb_sub.csv', float_format='%.4f', index=None)
+
+print("[INFO] Finished! ( ^ _ ^ ) V")
+print("[INFO] Done in %f seconds." % (time() - t0))
+
+# ====================================================================================== #
