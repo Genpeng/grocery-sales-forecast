@@ -42,6 +42,8 @@ items = pd.read_csv("../data/items.csv").set_index('item_nbr')
 print("[INFO] Finished! ( ^ _ ^ ) V")
 print("[INFO] Done in %f seconds." % (time() - t0))
 
+print("[INFO] Preprocessing...")
+
 encoder = LabelEncoder()
 stores['city'] = encoder.fit_transform(stores['city'].values)
 stores['state'] = encoder.fit_transform(stores['state'].values)
@@ -84,6 +86,9 @@ promo_2017_store_class = promo_2017.reset_index()
 promo_2017_store_class['class'] = items['class'].values
 promo_2017_store_class_index = promo_2017_store_class[['class', 'store_nbr']]
 promo_2017_store_class = promo_2017_store_class.groupby(['class', 'store_nbr'])[promo_2017.columns].sum()
+
+print("[INFO] Finished! ( ^ _ ^ ) V")
+print("[INFO] Done in %f seconds." % (time() - t0))
 
 # ====================================================================================== #
 
@@ -260,7 +265,8 @@ X_test2 = prepare_dataset(df_2017_item, promo_2017_item, date(2017, 8, 16), is_t
 X_test2.index = df_2017_item.index
 X_test2 = X_test2.reindex(df_2017.index.get_level_values(1)).reset_index(drop=True)
 
-X_test3 = prepare_dataset(df_2017_store_class, promo_2017_store_class, date(2017, 8, 16), is_train=False, name_prefix='store_class')
+X_test3 = prepare_dataset(
+    df_2017_store_class, promo_2017_store_class, date(2017, 8, 16), is_train=False, name_prefix='store_class')
 X_test3.index = df_2017_store_class.index
 X_test3 = X_test3.reindex(df_2017_store_class_index).reset_index(drop=True)
 
@@ -293,8 +299,8 @@ params = {
 }
 
 MAX_ROUNDS = 5000
-val_pred = []
-test_pred = []
+pred_val = []
+pred_test = []
 cate_vars = []
 for i in range(16):
     print('=' * 50)
@@ -318,30 +324,29 @@ for i in range(16):
     )
     print('\n'.join(("%s: %.2f" % x) for x in sorted(
         zip(X_train.columns, bst.feature_importance('gain')), key=lambda x: x[1], reverse=True)))
-    val_pred.append(
+    pred_val.append(
         bst.predict(X_val, num_iteration=bst.best_iteration or MAX_ROUNDS))
-    test_pred.append(
+    pred_test.append(
         bst.predict(X_test, num_iteration=bst.best_iteration or MAX_ROUNDS))
 
 print("[INFO] Finished! ( ^ _ ^ ) V")
 print("[INFO] Done in %f seconds." % (time() - t0))
 
-print("Validation mse:", mean_squared_error(y_val, np.array(val_pred).transpose()))
+print("Validation mse:", mean_squared_error(y_val, np.array(pred_val).transpose()))
 
 weight = items['perishable'] * 0.25 + 1
-err = (y_val - np.array(val_pred).transpose()) ** 2
+err = (y_val - np.array(pred_val).transpose()) ** 2
 err = err.sum(axis=1) * weight
 err = np.sqrt(err.sum() / weight.sum() / 16)
 print("nwrmsle = {}".format(err))
 
-y_val = np.array(val_pred).transpose()
-df_preds = pd.DataFrame(
-    y_val, index=df_2017.index,
+df_pred_val = pd.DataFrame(
+    np.array(pred_val).transpose(), index=df_2017.index,
     columns=pd.date_range('2017-07-26', periods=16)
 ).stack().to_frame('unit_sales')
-df_preds.index.set_names(['store_nbr', 'item_nbr', 'date'], inplace=True)
-df_preds['unit_sales'] = np.clip(np.expm1(df_preds['unit_sales']), 0, 1000)
-df_preds.reset_index().to_csv('lgb_cv.csv', index=False)
+df_pred_val.index.set_names(['store_nbr', 'item_nbr', 'date'], inplace=True)
+df_pred_val['unit_sales'] = np.clip(np.expm1(df_pred_val['unit_sales']), 0, 1000)
+df_pred_val.reset_index().to_csv('lgb_cv.csv', index=False)
 
 # ====================================================================================== #
 
@@ -351,14 +356,13 @@ df_preds.reset_index().to_csv('lgb_cv.csv', index=False)
 print("[INFO] Make submission...")
 t0 = time()
 
-y_test = np.array(test_pred).transpose()
-df_preds = pd.DataFrame(
-    y_test, index=df_2017.index,
+df_pred_test = pd.DataFrame(
+    np.array(pred_test).transpose(), index=df_2017.index,
     columns=pd.date_range('2017-08-16', periods=16)
 ).stack().to_frame('unit_sales')
-df_preds.index.set_names(['store_nbr', 'item_nbr', 'date'], inplace=True)
+df_pred_test.index.set_names(['store_nbr', 'item_nbr', 'date'], inplace=True)
 
-submission = df_test[['id']].join(df_preds, how='left').fillna(0)
+submission = df_test[['id']].join(df_pred_test, how='left').fillna(0)
 submission['unit_sales'] = np.clip(np.expm1(submission['unit_sales']), 0, 1000)
 submission.to_csv('lgb_sub.csv', float_format='%.4f', index=None)
 
